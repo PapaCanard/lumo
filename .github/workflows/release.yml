@@ -1,0 +1,68 @@
+# Construit l'installeur Windows de Lumo sur une machine Windows de GitHub
+# et le publie dans « Releases » (Lumo-Setup.exe + Lumo_<version>_x64-setup.exe).
+# Se lance à chaque modification envoyée sur main, ou à la main (onglet Actions → Run workflow).
+name: Installeur Windows
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["**.md", "docs/**", "LICENSE"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Dépendances
+        run: npm install
+
+      - name: Compilation et publication
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: v__VERSION__
+          releaseName: "Lumo v__VERSION__"
+          releaseBody: |
+            ## Installer Lumo
+            1. Télécharge **Lumo-Setup.exe** ci-dessous.
+            2. Double-clique dessus. Si Windows affiche « Windows a protégé votre ordinateur » : **Informations complémentaires** → **Exécuter quand même** (l'installeur n'est pas signé numériquement).
+            3. Lumo apparaît en haut de l'écran : clique sur **+ Ajouter une IA**.
+
+            Pas besoin de droits administrateur. Désinstallation : Paramètres Windows → Applications → Lumo.
+          releaseDraft: false
+          prerelease: false
+
+      - name: Copie au nom fixe « Lumo-Setup.exe » (lien de téléchargement permanent)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $v = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $exe = Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+          Copy-Item $exe.FullName Lumo-Setup.exe
+          gh release upload "v$v" Lumo-Setup.exe --clobber
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Lumo-Setup
+          path: src-tauri/target/release/bundle/nsis/*-setup.exe
