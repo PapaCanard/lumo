@@ -8,6 +8,7 @@ export const ICON = {
   back: svg('<path d="m15 18-6-6 6-6"/>'),
   x: svg('<path d="M18 6 6 18M6 6l12 12"/>', 'width="14" height="14"'),
   check: svg('<path d="M20 6 9 17l-5-5"/>'),
+  globe: svg('<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>'),
   plus: svg('<path d="M12 5v14M5 12h14"/>'),
   capFiles: svg('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="m10 13-2 2 2 2M14 13l2 2-2 2"/>'),
   capImages: svg('<rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="8.5" cy="9.5" r="1.8"/><path d="m21 16-5-5-9 9"/>'),

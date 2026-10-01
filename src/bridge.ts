@@ -27,7 +27,7 @@ function mockImage(): string {
   return c.toDataURL("image/png").split(",")[1];
 }
 
-async function mockAsk(kind: string, cred: string, model: string, hint: string): Promise<unknown> {
+async function mockAsk(kind: string, cred: string, model: string, hint: string, body: any = {}): Promise<unknown> {
   await sleep(1200);
   const key = mockKeys[cred] ?? "";
   if (kind !== "openai" && !key) throw "http 401: aucun identifiant enregistré";
@@ -41,6 +41,34 @@ async function mockAsk(kind: string, cred: string, model: string, hint: string):
     : /^r[ée]ponds uniquement/i.test(hint) || /test de connexion/i.test(hint)
       ? "ok"
       : `Réponse simulée de **${model || kind}** : « ${hint.slice(0, 80)} ».\n\n- premier point\n- deuxième point`;
+  // simulation de l'accès web
+  const webInSystem = /Informations trouvées sur internet/.test(JSON.stringify(body.system ?? body.messages?.[0] ?? body.prompt ?? ""));
+  if (kind === "claude" && body.tools) {
+    const msgs = body.messages ?? [];
+    const lastMsg = msgs[msgs.length - 1];
+    if (/https?:\/\//.test(hint) && !(Array.isArray(lastMsg?.content) && lastMsg.content.some((b: any) => b.type === "tool_result")))
+      return { content: [{ type: "text", text: "Je lis la page." }, { type: "tool_use", id: "tu_1", name: "fetch_page", input: { url: /https?:\/\/\S+/.exec(hint)![0] } }], stop_reason: "tool_use" };
+    return { content: [
+      { type: "server_tool_use", id: "s1", name: "web_search", input: { query: hint.slice(0, 60) } },
+      { type: "web_search_tool_result", tool_use_id: "s1", content: [{ type: "web_search_result", url: "https://www.lemonde.fr/", title: "Le Monde" }] },
+      { type: "text", text: "D'après les dernières informations, voici la réponse", citations: [{ type: "web_search_result_location", url: "https://www.lemonde.fr/", title: "Le Monde — actualité" }] },
+      { type: "text", text: " (simulation avec recherche web)." }], stop_reason: "end_turn" };
+  }
+  if (kind === "gemini" && body.tools) {
+    return { candidates: [{ content: { parts: [{ text: "Réponse Gemini appuyée sur Google Search (simulation)." }] }, finishReason: "STOP",
+      groundingMetadata: { webSearchQueries: [hint.slice(0, 50)], groundingChunks: [{ web: { uri: "https://meteofrance.com/", title: "meteofrance.com" } }, { web: { uri: "https://www.lefigaro.fr/", title: "lefigaro.fr" } }] } }] };
+  }
+  if (kind === "openai" && body.tools) {
+    const toolMsgs = (body.messages ?? []).filter((m: any) => m.role === "tool");
+    if (!toolMsgs.length) return { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "c1", type: "function", function: { name: "web_search", arguments: JSON.stringify({ query: hint.slice(0, 60) }) } }] }, finish_reason: "tool_calls" }] };
+    if (toolMsgs.length === 1) return { choices: [{ message: { role: "assistant", content: "", tool_calls: [{ id: "c2", type: "function", function: { name: "fetch_page", arguments: JSON.stringify({ url: "https://exemple1.fr/article-1" }) } }] }, finish_reason: "tool_calls" }] };
+    return { choices: [{ message: { role: "assistant", content: `Selon mes recherches [1], voici ce que j'ai trouvé (${toolMsgs.length} outils utilisés).` }, finish_reason: "stop" }] };
+  }
+  if (webInSystem) {
+    const t = "Réponse construite à partir des résultats de recherche fournis par Lumo [1][2].";
+    if (kind === "openai") return { choices: [{ message: { role: "assistant", content: t }, finish_reason: "stop" }] };
+    return { text: t };
+  }
   if (kind === "claude") return { content: [{ type: "text", text }], stop_reason: "end_turn" };
   if (kind === "gemini") {
     const parts: any[] = [{ text }];
@@ -73,7 +101,7 @@ export async function credDelete(id: string): Promise<void> {
 }
 /** `hint` ne sert qu'au faux backend. */
 export async function askProvider(kind: string, cred: string, model: string, body: unknown, hint = "", baseUrl?: string): Promise<any> {
-  if (!inTauri) return mockAsk(kind, cred, model, hint);
+  if (!inTauri) return mockAsk(kind, cred, model, hint, body);
   return invoke("ask_provider", { kind, cred, model, body, baseUrl: baseUrl ?? null });
 }
 export async function listModels(kind: string, cred: string, baseUrl?: string): Promise<string[]> {
@@ -119,4 +147,29 @@ export async function dock(height: number): Promise<void> {
 export async function appbar(enable: boolean, height: number): Promise<void> {
   if (!inTauri) return;
   await invoke("appbar", { enable, height });
+}
+
+// ─── accès à internet ──────────────────────────────────────────────────────────
+export interface FetchedPage { url: string; status: number; content_type: string; body: string }
+
+function mockPage(url: string): FetchedPage {
+  if (/duckduckgo\.com/.test(url)) {
+    const q = decodeURIComponent(/[?&]q=([^&]*)/.exec(url)?.[1] ?? "").replace(/\+/g, " ");
+    const items = [1, 2, 3, 4, 5].map((i) => `<div class="result results_links web-result"><h2 class="result__title"><a class="result__a" href="//duckduckgo.com/l/?uddg=${encodeURIComponent(`https://exemple${i}.fr/article-${i}`)}&rut=x">Résultat ${i} pour ${q}</a></h2><a class="result__snippet">Extrait n°${i} : informations récentes sur ${q}.</a></div>`).join("");
+    return { url, status: 200, content_type: "text/html", body: `<html><body>${items}</body></html>` };
+  }
+  return { url, status: 200, content_type: "text/html", body: `<html><head><title>Article de ${new URL(url).hostname}</title><script>x()</script></head><body><nav>menu</nav><article><h1>Titre de l'article</h1><p>Contenu publié le 1er octobre 2026 sur ${url}.</p><p>Deuxième paragraphe.</p></article><footer>pied</footer></body></html>` };
+}
+
+export async function webFetch(url: string): Promise<FetchedPage> {
+  if (!inTauri) { await sleep(300); return mockPage(url); }
+  return invoke<FetchedPage>("web_fetch", { url });
+}
+export async function webSearchApi(engine: string, query: string, count: number): Promise<any> {
+  if (!inTauri) {
+    await sleep(300);
+    if (!mockKeys[`search-${engine}`]) throw "http 401: aucune clé enregistrée pour ce moteur de recherche";
+    return { results: [1, 2, 3].map((i) => ({ title: `${engine} ${i} : ${query}`, url: `https://source${i}.com/`, content: `Extrait ${i}` })), web: { results: [] } };
+  }
+  return invoke("web_search_api", { engine, query, count });
 }

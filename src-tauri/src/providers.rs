@@ -31,7 +31,7 @@ fn valid_model(model: &str) -> bool {
 }
 
 /// Erreur lisible : « http 401: message » — l'interface s'en sert pour choisir l'animation.
-fn http_error(status: u16, body: &str) -> String {
+pub(crate) fn http_error(status: u16, body: &str) -> String {
     let message = serde_json::from_str::<Value>(body)
         .ok()
         .and_then(|v| {

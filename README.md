@@ -18,6 +18,7 @@ Deux yeux lumineux animés (façon petit robot de bureau) qui vivent dans une **
 - **Tes IA, et seulement elles** : la barre n'affiche que les IA ajoutées, sous le nom que tu leur as donné. Le petit « + » au bout des onglets ouvre l'assistant d'ajout.
 - **Assistant d'ajout** (⚙ → « Ajouter une IA ») : 1. choisir l'IA dans un menu déroulant, 2. coller la clé et choisir le modèle (« Lister les modèles »), 3. tester la connexion, 4. si le test est bon, lui donner un nom et une couleur → elle apparaît dans la barre. Plusieurs IA du même fournisseur sont possibles (ex. « Claude rapide » et « Claude Opus »).
 - **Pictogrammes de capacités** : à côté des onglets, quatre icônes indiquent ce que sait faire le modèle en cours — fichiers texte et code, lecture d'images, lecture de PDF, génération d'images (barrée = non). Détecté automatiquement d'après le modèle, corrigeable dans la carte de l'IA. Lumo prévient avant d'envoyer une pièce jointe que le modèle ne sait pas lire.
+- **Accès à internet** (⚙ → « Accès à internet », ou le globe 🌐 dans la barre) : les IA cherchent sur le web et lisent les pages pour répondre avec des informations à jour, et citent leurs sources sous la réponse. Claude et Gemini utilisent leur recherche intégrée ; ChatGPT, Mistral, Groq, OpenRouter et DeepSeek appellent les outils de Lumo (chercher, lire une page) ; pour Copilot et les IA locales, Lumo cherche d'abord puis leur transmet les résultats. Moteur : DuckDuckGo (gratuit, sans clé, repli automatique sur Bing) ou Tavily / Brave Search avec une clé. Par sécurité, Lumo refuse de lire les adresses locales ou privées (localhost, 192.168.x.x…).
 - **Génération d'images** : avec un modèle Gemini « …-image », les images produites s'affichent dans la console (clic = enregistrer).
 - **Couleur de la barre** : ⚙ → Apparence, au choix ou parmi 8 teintes (le texte passe en sombre sur une barre claire). Les yeux prennent la couleur de l'IA active.
 - **Identifiants** : chaque IA a sa clé dans le **Gestionnaire d'identifiants de Windows**, jamais sur disque, jamais réaffichée.
@@ -33,6 +34,10 @@ Code entièrement original (personnage, sons synthétisés). Architecture inspir
 | ![Assistant d'ajout](docs/ajout-ia.png) | ![Console](docs/console.png) |
 
 ![Les émotions de Lumo](docs/yeux.png)
+
+| Accès à internet | Sources sous les réponses |
+|---|---|
+| ![Accès à internet](docs/internet.png) | ![Sources](docs/sources.png) |
 
 ## Les IA proposées à l'ajout
 
@@ -122,6 +127,7 @@ MIT — © 2026 Romain Leclerc, DoIt Consulting.
 
 ## Versions
 
+- **2.1** — Accès à internet pour toutes les IA (bouton dans les réglages et globe dans la barre), sources cliquables sous les réponses, liens cliquables dans les réponses.
 - **2.0** — IA ajoutées par l'utilisateur (assistant : choix dans une liste → clé et modèle → test → nom) et seules affichées dans la barre ; 11 IA proposées (dont ChatGPT, Mistral, OpenRouter, Groq, DeepSeek, LM Studio) ; pictogrammes des capacités du modèle ; génération d'images Gemini ; couleur de la barre. Les clés de la v1 sont reprises automatiquement.
 - **1.1** — Lumo n'est plus qu'une paire d'yeux animés (inspirés des petits robots de bureau), icône de l'application refaite. Barre modernisée : coins arrondis, yeux dans une « visière », sélecteur d'IA à capsule glissante, champ de saisie en capsule, console qui se déroule avec une ombre.
 - **1.0** — Barre noire style cmd en haut de l'écran, robot vectoriel.

@@ -1,9 +1,10 @@
 // Réglages : mes IA (ajout guidé, modification, suppression), apparence de la barre, options générales.
-import { autostart, copilotCheck, credDelete, credSave, listModels, openUrl, quitApp } from "./bridge";
+import { autostart, copilotCheck, credDelete, credSave, credStatus, listModels, openUrl, quitApp } from "./bridge";
 import { CAP_LABELS, PRESETS, guessCaps, newId, presetOf, type Caps, type Connection, type Preset } from "./connections";
 import { ICON } from "./icons";
 import { explainError, testConnection } from "./providers";
 import { DEFAULT_BAR, DEFAULT_SYSTEM, type Prefs } from "./store";
+import { ENGINES, search, type Engine } from "./web";
 
 export interface SettingsHost {
   prefs: Prefs;
@@ -14,6 +15,8 @@ export interface SettingsHost {
   /** Les IA ont changé (ajout, nom, couleur, suppression) : redessiner la barre. */
   connectionsChanged(selectId?: string): void;
   onBarColor(color: string): void;
+  /** L'accès à internet a été activé ou coupé. */
+  onWeb(): void;
   onSound(on: boolean): void;
   onTop(on: boolean): void;
   onReserve(on: boolean): void;
@@ -113,6 +116,9 @@ export async function renderSettings(root: HTMLElement, host: SettingsHost, opts
   }
   for (const c of conns) list.append(connectionCard(c, root, host, opts.flash === c.id));
   if (opts.wizard || !conns.length) openWizard();
+
+  // ─── accès à internet ───────────────────────────────────────────────────────
+  scroll.append(webPanel(host));
 
   // ─── apparence ──────────────────────────────────────────────────────────────
   const look = el("section", "panel");
@@ -487,4 +493,93 @@ function connectionCard(c: Connection, root: HTMLElement, host: SettingsHost, fl
     await renderSettings(root, host);
   };
   return card;
+}
+
+// ─── accès à internet ───────────────────────────────────────────────────────────
+function webPanel(host: SettingsHost): HTMLElement {
+  const { prefs } = host;
+  const panel = el("section", "panel web-panel" + (prefs.web ? " on" : ""));
+  const head = el("div", "web-head");
+  const globe = el("span", "web-globe");
+  globe.innerHTML = ICON.globe;
+  const txt = el("div", "web-txt");
+  txt.append(el("h3", "", "Accès à internet"), el("span", "muted small", "Les IA peuvent chercher sur le web et lire des pages pour répondre avec des informations à jour, et citer leurs sources."));
+  const sw = el("label", "switch");
+  const cb = input("checkbox");
+  cb.checked = prefs.web;
+  sw.append(cb, el("span", "slider"));
+  sw.title = "Activer / couper l'accès à internet";
+  head.append(globe, txt, sw);
+  panel.append(head);
+
+  const body = el("div", "web-body");
+  panel.append(body);
+  cb.onchange = () => {
+    prefs.web = cb.checked;
+    host.save();
+    panel.classList.toggle("on", prefs.web);
+    host.onWeb();
+    host.react(prefs.web ? "ok" : "deleted");
+  };
+
+  const how = el("ul", "web-how small");
+  [
+    ["Claude", "utilise la recherche web d'Anthropic (à activer dans la console Anthropic si ton organisation l'a désactivée ; sinon Lumo cherche à sa place)."],
+    ["Gemini", "utilise la recherche Google intégrée (sauf les modèles qui génèrent des images)."],
+    ["ChatGPT, Mistral, Groq, OpenRouter, DeepSeek", "appellent les outils de Lumo : « chercher » et « lire une page »."],
+    ["Copilot et IA locales", "Lumo cherche d'abord, puis leur transmet les résultats avec ta question."],
+  ].forEach(([who, what]) => { const li = el("li"); li.append(el("strong", "", who), ` ${what}`); how.append(li); });
+  body.append(how);
+
+  const engineSel = el("select");
+  for (const e of ENGINES) { const o = el("option", "", e.label); o.value = e.id; engineSel.append(o); }
+  engineSel.value = prefs.webEngine;
+  const note = el("p", "muted small");
+  const keyIn = input("password");
+  const keyField = field("Clé API du moteur", keyIn);
+  const res = resultLine();
+  const bTest = el("button", "btn", "Tester la recherche");
+  const bSaveKey = el("button", "btn primary", "Enregistrer la clé");
+  const row = el("div", "btn-row");
+  row.append(bTest, bSaveKey);
+
+  const engine = () => ENGINES.find((e) => e.id === engineSel.value)!;
+  const refresh = async () => {
+    const e = engine();
+    note.replaceChildren(e.note);
+    if (e.keyUrl) {
+      const a = el("a", "link", " Obtenir une clé");
+      a.href = e.keyUrl;
+      a.onclick = (ev) => { ev.preventDefault(); void openUrl(e.keyUrl!); };
+      note.append(a);
+    }
+    const needsKey = e.id !== "duckduckgo";
+    keyField.hidden = !needsKey;
+    bSaveKey.hidden = !needsKey;
+    if (needsKey) {
+      const has = (await credStatus([`search-${e.id}`]).catch(() => ({} as Record<string, boolean>)))[`search-${e.id}`];
+      keyIn.placeholder = has ? "•••••••• (enregistrée — laisser vide pour conserver)" : "colle ta clé ici";
+    }
+  };
+  engineSel.onchange = () => { prefs.webEngine = engineSel.value as Engine; host.save(); res.set("", null); void refresh(); };
+  bSaveKey.onclick = async () => {
+    if (!keyIn.value.trim()) { res.set("Colle d'abord la clé.", false); return; }
+    try { await credSave(`search-${engine().id}`, keyIn.value); keyIn.value = ""; res.set("Clé enregistrée.", true); host.react("saved"); void refresh(); }
+    catch (e) { res.set(`Impossible d'enregistrer la clé : ${String((e as any)?.message ?? e)}`, false); }
+  };
+  bTest.onclick = async () => {
+    bTest.disabled = true;
+    res.set("Recherche « actualité du jour »…", null);
+    try {
+      if (keyIn.value.trim()) { await credSave(`search-${engine().id}`, keyIn.value); keyIn.value = ""; void refresh(); }
+      const list = await search("actualité du jour", prefs.webEngine, 3);
+      if (!list.length) { res.set("Le moteur n'a renvoyé aucun résultat.", false); host.react("fail"); return; }
+      res.set(`Ça marche : ${list.map((r) => r.title).slice(0, 3).join(" · ")}`, true);
+      host.react("ok");
+    } catch (e) { res.set(String((e as any)?.message ?? e), false); host.react("fail"); }
+    finally { bTest.disabled = false; }
+  };
+  void refresh();
+  body.append(field("Moteur de recherche utilisé par Lumo", engineSel), note, keyField, row, res.el);
+  return panel;
 }

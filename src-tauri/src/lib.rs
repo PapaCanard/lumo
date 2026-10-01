@@ -3,6 +3,7 @@
 mod appbar;
 mod providers;
 mod secrets;
+mod web;
 
 use std::collections::HashMap;
 
@@ -72,6 +73,19 @@ async fn ask_provider(kind: String, cred: String, model: String, body: Value, ba
 #[tauri::command]
 async fn list_models(kind: String, cred: String, base_url: Option<String>) -> Result<Vec<String>, String> {
     providers::list_models(&kind, &key_for(&cred), base_url.as_deref()).await
+}
+
+/// Lit une page publique d'internet pour une IA (les adresses locales et privées sont refusées).
+#[tauri::command]
+async fn web_fetch(url: String) -> Result<web::Page, String> {
+    web::fetch(&url).await
+}
+
+/// Recherche avec un moteur à clé ; la clé est rangée sous « search-<moteur> ».
+#[tauri::command]
+async fn web_search_api(engine: String, query: String, count: u32) -> Result<Value, String> {
+    let key = key_for(&format!("search-{engine}"));
+    web::search_api(&engine, &key, &query, count).await
 }
 
 #[tauri::command]
@@ -189,6 +203,8 @@ pub fn run() {
             ask_provider,
             copilot_check,
             list_models,
+            web_fetch,
+            web_search_api,
             dock,
             appbar,
             quit

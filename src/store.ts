@@ -1,5 +1,6 @@
 // Préférences et historique : uniquement dans le navigateur de l'appli (jamais de secrets ici).
 import type { Connection } from "./connections";
+import type { Engine } from "./web";
 
 export interface Prefs {
   /** Les IA ajoutées, dans l'ordre de la barre. `undefined` = premier lancement de la V2 (migration à faire). */
@@ -10,6 +11,9 @@ export interface Prefs {
   sound: boolean;
   alwaysOnTop: boolean;
   reserve: boolean;
+  /** Accès à internet pour les IA. */
+  web: boolean;
+  webEngine: Engine;
 }
 
 /** Anciennes préférences (v1), lues une seule fois pour la migration. */
@@ -24,6 +28,7 @@ export interface StoredMessage {
   provider?: string; // v1
   files?: string[];
   error?: boolean;
+  sources?: { title: string; url: string }[];
 }
 
 export const DEFAULT_SYSTEM =
@@ -38,6 +43,8 @@ export const DEFAULT_PREFS: Prefs = {
   sound: true,
   alwaysOnTop: true,
   reserve: true,
+  web: true,
+  webEngine: "duckduckgo",
 };
 
 const K_PREFS = "lumo.prefs";

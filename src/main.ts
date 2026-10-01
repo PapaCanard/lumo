@@ -1,12 +1,12 @@
 // Lumo — point d'entrée : assemble le personnage, le chat, les réglages et la fenêtre.
 import "./style.css";
 import { Lumo, type EmoteId } from "./character";
-import { credStatus, inTauri, onOpenSettings } from "./bridge";
+import { credStatus, inTauri, onOpenSettings, openUrl } from "./bridge";
 import { CAP_LABELS, eyeColor, guessCaps, luminance, presetOf, type Caps, type Connection } from "./connections";
 import { readFile, MAX_FILES } from "./files";
 import { ICON } from "./icons";
 import { renderMarkdown } from "./markdown";
-import { ask, explainError, type Attachment, type ChatMsg } from "./providers";
+import { ask, explainError, type Attachment, type ChatMsg, type WebStep } from "./providers";
 import { reactToError, reactToFile, reactToReply, reactToTyping } from "./reactions";
 import { renderSettings, type SettingsOptions } from "./settings";
 import { setSoundEnabled, sfx } from "./sound";
@@ -55,7 +55,7 @@ const active = (): Connection | undefined => conns().find((c) => c.id === prefs.
 
 const history: ChatMsg[] = loadHistory().map((m: StoredMessage) => ({
   role: m.role, text: m.text, conn: m.conn, label: m.label ?? (m.provider ? m.provider[0].toUpperCase() + m.provider.slice(1) : undefined),
-  color: m.color, error: m.error,
+  color: m.color, error: m.error, sources: m.sources,
   attachments: (m.files ?? []).map((name) => ({ name, mime: "", kind: "text" as const, size: 0, text: "" })),
 }));
 let pending: Attachment[] = [];
@@ -70,7 +70,7 @@ lumo.onSfx = sfx;
 function persist() {
   saveHistory(history.map((m) => ({
     role: m.role, text: m.images?.length ? `${m.text}${m.text ? "\n\n" : ""}_(${m.images.length} image${m.images.length > 1 ? "s" : ""} générée${m.images.length > 1 ? "s" : ""}, non conservée${m.images.length > 1 ? "s" : ""})_` : m.text,
-    conn: m.conn, label: m.label, color: m.color, error: m.error, files: (m.attachments ?? []).map((a) => a.name),
+    conn: m.conn, label: m.label, color: m.color, error: m.error, sources: m.sources, files: (m.attachments ?? []).map((a) => a.name),
   })));
 }
 const savePrefsNow = () => savePrefs(prefs);
@@ -146,6 +146,20 @@ function renderCaps() {
     summary.push(`${c.caps[k] ? "✓" : "✗"} ${CAP_LABELS[k]}`);
   });
   capsEl.title = `${c.name}${c.model ? ` (${c.model})` : ""}\n${summary.join("\n")}`;
+  // globe : accès à internet, activable d'un clic
+  const g = document.createElement("button");
+  g.className = `cap-ico web ${prefs.web ? "on" : "off"}`;
+  g.innerHTML = ICON.globe;
+  g.title = prefs.web ? "Accès à internet : activé (clic pour couper)" : "Accès à internet : coupé (clic pour activer)";
+  g.onclick = () => {
+    prefs.web = !prefs.web;
+    savePrefsNow();
+    renderCaps();
+    lumo.play(prefs.web ? "search" : "sleepy");
+    say(prefs.web ? "Accès à internet activé." : "Accès à internet coupé.", 2500);
+    if (view === "settings" && currentMode() === "console") void openSettings();
+  };
+  capsEl.append(g);
 }
 
 let pillsKey = "";
@@ -232,6 +246,7 @@ async function openSettings(opts: SettingsOptions = {}) {
     prefs, get keys() { return keys; }, save: savePrefsNow, refreshKeys,
     connectionsChanged: (selectId) => { applyActive(!!selectId); renderMessages(); if (selectId) flashPill(selectId); },
     onBarColor: applyBarColor,
+    onWeb: () => renderCaps(),
     onSound: setSoundEnabled, onTop: (on) => void setAlwaysOnTop(on), onReserve: (on) => void setReserve(on),
     clearHistory: () => { history.length = 0; persist(); renderMessages(); },
     react: (k) => lumo.play(k === "saved" ? "nod" : k === "ok" ? "proud" : k === "added" ? "party" : k === "deleted" ? "sad" : "key"),
@@ -316,11 +331,32 @@ function renderMessages() {
       });
       row.append(gal);
     }
+    if (m.sources?.length) {
+      const src = document.createElement("div");
+      src.className = "sources";
+      const lbl = document.createElement("span");
+      lbl.className = "src-lbl";
+      lbl.innerHTML = `${ICON.globe}<span>Sources</span>`;
+      src.append(lbl);
+      m.sources.forEach((sct, i) => {
+        const a = document.createElement("a");
+        a.className = "ext src";
+        a.href = sct.url;
+        let host = sct.url;
+        try { host = new URL(sct.url).hostname.replace(/^www\./, ""); } catch { /* rien */ }
+        a.textContent = `${i + 1}. ${/^https?:|vertexaisearch/.test(sct.title) || !sct.title ? host : sct.title.slice(0, 48)}`;
+        a.title = `${sct.title}\n${sct.url}`;
+        src.append(a);
+      });
+      row.append(src);
+    }
     messagesEl.append(row);
   }
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 messagesEl.addEventListener("click", (e) => {
+  const link = (e.target as HTMLElement).closest<HTMLAnchorElement>("a.ext");
+  if (link) { e.preventDefault(); if (/^https?:\/\//.test(link.href)) void openUrl(link.href); return; }
   const btn = (e.target as HTMLElement).closest("button.copy");
   if (!btn) return;
   const code = btn.parentElement?.querySelector("code")?.textContent ?? "";
@@ -332,7 +368,7 @@ function addThinkingRow() {
   row.className = "msg assistant thinking";
   row.style.setProperty("--pc", active()?.color ?? ACCENT_NONE);
   row.id = "thinking-row";
-  row.innerHTML = `<div class="who"><span class="dot"></span><span></span></div><div class="body"><span class="dots"><i></i><i></i><i></i></span></div>`;
+  row.innerHTML = `<div class="who"><span class="dot"></span><span></span></div><div class="body"><span class="dots"><i></i><i></i><i></i></span><span class="web-step" id="web-step"></span></div>`;
   (row.querySelector(".who span:last-child") as HTMLElement).textContent = active()?.name ?? "IA";
   messagesEl.append(row);
   messagesEl.scrollTop = messagesEl.scrollHeight;
@@ -465,8 +501,8 @@ async function send() {
   sfx("send");
   lumo.setThinking(true);
   try {
-    const reply = await ask(c, prefs.system, history);
-    history.push({ role: "assistant", text: reply.text, images: reply.images, conn: c.id, label: c.name, color: c.color });
+    const reply = await ask(c, prefs.system, history, { web: prefs.web ? { engine: prefs.webEngine } : undefined, onStep: showStep });
+    history.push({ role: "assistant", text: reply.text, images: reply.images, sources: reply.sources, conn: c.id, label: c.name, color: c.color });
     lumo.setThinking(false);
     lumo.play(reply.images.length ? "camera" : reactToReply(reply.text));
     if (currentMode() !== "console") { say(preview(reply.text || "Image générée.")); void openPanel(); }
@@ -481,6 +517,20 @@ async function send() {
     persist();
     renderMessages();
   }
+}
+
+/** Ce que fait l'IA sur internet, affiché sous les trois points. */
+let lastStepEmote = 0;
+function showStep(st: WebStep) {
+  const el = document.getElementById("web-step");
+  if (el) {
+    let host = "";
+    if (st.kind === "read") { try { host = new URL(st.url).hostname.replace(/^www\./, ""); } catch { host = st.url; } }
+    el.textContent = st.kind === "search" ? `Recherche : « ${st.query.slice(0, 70)} »` : st.kind === "read" ? `Lecture de ${host}` : "Recherche sur internet…";
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+  const now = performance.now();
+  if (now - lastStepEmote > 2500) { lastStepEmote = now; lumo.play(st.kind === "read" ? "reading" : "search"); }
 }
 
 // ─── interactions avec Lumo : clic, survol ─────────────────────────────────────
