@@ -32,7 +32,11 @@ export interface Reply { text: string; images: string[]; sources: Source[] }
 
 /** Ce que l'IA est en train de faire sur internet (affiché pendant qu'elle réfléchit). */
 export type WebStep = { kind: "search"; query: string } | { kind: "read"; url: string } | { kind: "web" };
-export interface AskOptions { web?: { engine: Engine }; onStep?: (s: WebStep) => void }
+export interface AskOptions {
+  /** `presearch` : la question nécessite vraiment internet (sinon les IA sans outils répondent sans chercher). */
+  web?: { engine: Engine; presearch?: boolean };
+  onStep?: (s: WebStep) => void;
+}
 
 // ─── préparation de l'historique ───────────────────────────────────────────────
 const fileBlock = (a: Attachment) => `[Fichier : ${a.name}]\n\`\`\`\n${a.text ?? ""}\n\`\`\``;
@@ -168,7 +172,7 @@ export async function ask(c: Connection, system: string, history: ChatMsg[], opt
   return preSearch(c, sys, history, ctx);
 }
 
-const WEB_RULES = "Tu as accès à internet. Pour l'actualité, les prix, la météo, les horaires, les versions de logiciels, toute information qui a pu changer récemment ou un lien donné par l'utilisateur, cherche et lis des pages web au lieu de répondre de mémoire. Cite tes sources sous la forme [1], [2]… et indique les dates quand elles comptent.";
+const WEB_RULES = "Tu as accès à internet, mais ne t'en sers que si c'est nécessaire : actualité, prix, météo, horaires, versions de logiciels, toute information qui a pu changer récemment, ou un lien donné par l'utilisateur. Ne cherche jamais pour une salutation, un remerciement, une conversation, du code, de la rédaction ou une question de culture générale que tu connais. Quand tu cherches, cite tes sources sous la forme [1], [2]… et indique les dates quand elles comptent.";
 
 class WebCtx {
   sources = new Map<string, Source>();
@@ -301,6 +305,8 @@ async function toolsWeb(c: Connection, sys: string, history: ChatMsg[], ctx: Web
 
 /** Copilot, IA locales, ou modèle sans outils : Lumo cherche d'abord, puis donne les résultats à l'IA. */
 async function preSearch(c: Connection, sys: string, history: ChatMsg[], ctx: WebCtx): Promise<Reply> {
+  // Pas de besoin réel (mode « l'IA décide ») : ces IA ne savent pas chercher seules, on répond sans internet.
+  if (ctx.opts.web?.presearch === false) return askPlain(c, sys, history);
   const users = history.filter((m) => m.role === "user").map((m) => m.text);
   const q = users[users.length - 1] ?? "";
   const urls = (q.match(/https?:\/\/[^\s<>"'\])]+/g) ?? []).slice(0, 2);

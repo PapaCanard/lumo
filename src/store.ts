@@ -14,8 +14,8 @@ export interface Prefs {
   /** Accès à internet pour les IA. */
   web: boolean;
   webEngine: Engine;
-  /** « ask » : seulement quand l'utilisateur le demande ; « auto » : l'IA décide. */
-  webMode: "ask" | "auto";
+  /** Quand aller sur internet : « need » quand c'est utile (Lumo juge), « ask » seulement sur demande, « auto » l'IA décide. */
+  webPolicy: "need" | "ask" | "auto";
   /** Mémoire partagée entre toutes les IA. */
   memory: boolean;
 }
@@ -50,7 +50,7 @@ export const DEFAULT_PREFS: Prefs = {
   reserve: true,
   web: true,
   webEngine: "duckduckgo",
-  webMode: "ask",
+  webPolicy: "need",
   memory: true,
 };
 

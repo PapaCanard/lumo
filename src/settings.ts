@@ -508,7 +508,7 @@ function webPanel(host: SettingsHost): HTMLElement {
   const globe = el("span", "web-globe");
   globe.innerHTML = ICON.globe;
   const txt = el("div", "web-txt");
-  txt.append(el("h3", "", "Accès à internet"), el("span", "muted small", "Les IA peuvent chercher sur le web et lire des pages, et citer leurs sources. Par défaut, seulement quand tu le demandes."));
+  txt.append(el("h3", "", "Accès à internet"), el("span", "muted small", "Les IA peuvent chercher sur le web et lire des pages, et citer leurs sources — seulement quand c'est utile."));
   const sw = el("label", "switch");
   const cb = input("checkbox");
   cb.checked = prefs.web;
@@ -535,14 +535,16 @@ function webPanel(host: SettingsHost): HTMLElement {
     ["Copilot et IA locales", "Lumo cherche d'abord, puis leur transmet les résultats avec ta question."],
   ].forEach(([who, what]) => { const li = el("li"); li.append(el("strong", "", who), ` ${what}`); how.append(li); });
   const modeSel = el("select");
-  for (const [v, t] of [["ask", "Seulement quand je le demande (recommandé)"], ["auto", "L'IA décide (cherche dès qu'elle le juge utile)"]]) { const o = el("option", "", t); o.value = v; modeSel.append(o); }
-  modeSel.value = prefs.webMode;
+  for (const [v, t] of [["need", "Quand c'est utile (recommandé)"], ["ask", "Seulement quand je le demande"], ["auto", "L'IA décide à chaque question"]]) { const o = el("option", "", t); o.value = v; modeSel.append(o); }
+  modeSel.value = prefs.webPolicy;
   const modeNote = el("p", "muted small");
-  const drawMode = () => modeNote.textContent = prefs.webMode === "ask"
-    ? "Pour demander : clique sur le globe 🌐 de la barre avant d'envoyer, écris « cherche sur internet… » / « /web … », ou colle un lien."
-    : "Le globe de la barre reste allumé : l'IA peut chercher à chaque message (réponses un peu plus lentes).";
+  const drawMode = () => modeNote.textContent = ({
+    need: "Lumo va sur internet seulement si ta question en a besoin (actualité, météo, prix, horaires, versions, « aujourd'hui »…) ou si tu le demandes. Jamais pour un bonjour, un merci ou du bavardage.",
+    ask: "Uniquement quand tu le demandes : globe 🌐 de la barre avant d'envoyer, « cherche sur internet… », « /web … », ou un lien.",
+    auto: "Claude, Gemini, ChatGPT… peuvent chercher à chaque question s'ils le jugent utile (jamais pour bavarder). Réponses parfois plus lentes.",
+  } as const)[prefs.webPolicy];
   drawMode();
-  modeSel.onchange = () => { prefs.webMode = modeSel.value as "ask" | "auto"; host.save(); drawMode(); host.onWeb(); };
+  modeSel.onchange = () => { prefs.webPolicy = modeSel.value as "need" | "ask" | "auto"; host.save(); drawMode(); host.onWeb(); };
   body.append(field("Quand chercher sur internet", modeSel), modeNote, how);
 
   const engineSel = el("select");

@@ -127,3 +127,29 @@ export function wantsWeb(text: string): boolean {
 }
 /** Retire le préfixe « /web » ou « web: » éventuel. */
 export const stripWebPrefix = (t: string) => t.replace(/^\s*(\/web\b|web\s*:)\s*/i, "");
+
+const norm = (t: string) => t.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[’`]/g, "'");
+
+/** Salutation, remerciement, politesse ou bavardage : jamais besoin d'internet. */
+export function isSmallTalk(text: string): boolean {
+  const s = norm(text).replace(/[^a-z0-9' ]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!s) return true;
+  const words = s.split(" ");
+  const polite = /^(bonjour|bonsoir|salut|coucou|hello|hey|hi|yo|re|bonne (journee|soiree|nuit)|merci|thanks|thank you|super|cool|top|parfait|genial|ok|okay|d'accord|daccord|ca marche|oui|non|bien|tres bien|bravo|au revoir|a plus|a bientot|bye|lumo|ca va|comment (ca va|vas tu|allez vous)|tu vas bien|quoi de neuf|bonne (chance|continuation)|desole|pardon|haha|lol|mdr)\b/;
+  if (polite.test(s) && words.length <= 8 && !needsWeb(text)) return true;
+  return words.length <= 2 && !/\d/.test(s) && !/https?:/.test(text);
+}
+
+/** La question dépend-elle d'informations récentes ou changeantes (donc d'internet) ? */
+export function needsWeb(text: string): boolean {
+  const s = norm(text);
+  return wantsWeb(text)
+    || /\b(aujourd'hui|ce (matin|soir|week-end|weekend|mois-ci)|cette (semaine|annee|nuit)|demain|hier|en ce moment|actuel(le)?(ment)?|maintenant|recemment|recent(e|es|s)?|dernier(e|es|s)? (version|mise a jour|sortie|actualite|nouvelle|resultat|match|episode|modele|iphone|update)|a jour|cette annee)\b/.test(s)
+    || /\b(actualites?|news|infos? du jour|meteo|temperature|previsions?|quel temps|il pleut|neige|canicule|vigilance)\b/.test(s)
+    || /\b(prix|tarifs?|combien coute|cout|cours (de|du|des) |bourse|action [a-z]+|bitcoin|crypto|taux (de change|d'interet|du livret)|inflation|smic)\b/.test(s)
+    || /\b(horaires?|ouvert|fermee?|adresse de|telephone de|itineraire|trafic|greve|retard)\b/.test(s)
+    || /\b(score|resultats? (du|des|de la)|classement|qui a gagne|match|election|sondage|elu|nomme|demission)\b/.test(s)
+    || /\b(sortie (de|du|le)|date de sortie|est (il|elle) sorti|disponible|release|changelog|nouveautes? de|cve-\d|faille|vulnerabilite)\b/.test(s)
+    || /\b(qui est (le|la|l') (actuel|president|premier ministre|ministre|pdg|ceo|directeur|maire))\b/.test(s)
+    || /\b20(2[5-9]|3\d)\b/.test(s);
+}

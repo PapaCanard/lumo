@@ -7,7 +7,7 @@ import { readFile, MAX_FILES } from "./files";
 import { ICON } from "./icons";
 import { renderMarkdown } from "./markdown";
 import { applyMemoryTags, loadMemory, memoryPrompt } from "./memory";
-import { stripWebPrefix, wantsWeb } from "./web";
+import { isSmallTalk, needsWeb, stripWebPrefix, wantsWeb } from "./web";
 import { ask, explainError, type Attachment, type ChatMsg, type WebStep } from "./providers";
 import { reactToError, reactToFile, reactToReply, reactToTyping } from "./reactions";
 import { renderSettings, type SettingsOptions } from "./settings";
@@ -150,16 +150,15 @@ function renderCaps() {
   capsEl.title = `${c.name}${c.model ? ` (${c.model})` : ""}\n${summary.join("\n")}`;
   // globe : recherche sur internet pour le prochain message (ou toujours, selon le réglage)
   const g = document.createElement("button");
-  const auto = prefs.web && prefs.webMode === "auto";
-  g.className = `cap-ico web ${!prefs.web ? "off" : auto || webArmed ? "on armed" : "on idle"}`;
+  const auto = prefs.web && prefs.webPolicy === "auto";
+  g.className = `cap-ico web ${!prefs.web ? "off" : webArmed ? "on armed" : "on idle"}`;
   g.innerHTML = ICON.globe;
   g.title = !prefs.web ? "Accès à internet coupé (⚙ → Accès à internet pour l'activer)"
-    : auto ? "Internet : l'IA cherche quand elle le juge utile (réglable dans ⚙)"
-    : webArmed ? "Recherche sur internet activée pour le prochain message (clic pour annuler)"
-    : "Clic : chercher sur internet pour le prochain message.\nTu peux aussi l'écrire : « cherche sur internet… », « /web … », ou donner un lien.";
+    : webArmed ? "Recherche sur internet forcée pour le prochain message (clic pour annuler)"
+    : (prefs.webPolicy === "ask" ? "Internet seulement quand tu le demandes." : auto ? "Internet : l'IA peut chercher à chaque question (jamais pour bavarder)." : "Internet quand c'est utile : actualité, météo, prix, horaires, versions… jamais pour bavarder.")
+      + "\nClic : forcer une recherche pour le prochain message. Tu peux aussi écrire « cherche sur internet… », « /web … », ou donner un lien.";
   g.onclick = () => {
     if (!prefs.web) { void openSettings(); say("L'accès à internet est coupé : active-le dans les réglages.", 4000); return; }
-    if (auto) { void openSettings(); return; }
     webArmed = !webArmed;
     renderCaps();
     if (webArmed) { lumo.play("search"); say("Je chercherai sur internet pour ta prochaine question.", 3000); inputEl.focus(); }
@@ -519,10 +518,14 @@ async function send() {
   sfx("send");
   lumo.setThinking(true);
   try {
-    const useWeb = prefs.web && (prefs.webMode === "auto" || webArmed || wantsWeb(text));
+    // Internet : sur demande (globe, « cherche sur internet », /web, lien) ou quand la question le nécessite ;
+    // jamais pour une salutation, un merci ou du bavardage.
+    const explicit = webArmed || wantsWeb(text);
+    const need = explicit || (prefs.webPolicy !== "ask" && !isSmallTalk(text) && needsWeb(text));
+    const useWeb = prefs.web && (need || (prefs.webPolicy === "auto" && !isSmallTalk(text)));
     if (webArmed) { webArmed = false; renderCaps(); }
     const system = prefs.system + (prefs.memory ? memoryPrompt() : "");
-    const reply = await ask(c, system, history, { web: useWeb ? { engine: prefs.webEngine } : undefined, onStep: showStep });
+    const reply = await ask(c, system, history, { web: useWeb ? { engine: prefs.webEngine, presearch: need } : undefined, onStep: showStep });
     const mem = prefs.memory ? applyMemoryTags(reply.text, c.name, text) : { text: reply.text, added: [], removed: [] };
     const memos = [...mem.added.map((t) => `Retenu : ${t}`), ...mem.removed.map((t) => `Oublié : ${t}`)];
     history.push({ role: "assistant", text: mem.text, images: reply.images, sources: reply.sources, memos, conn: c.id, label: c.name, color: c.color });
