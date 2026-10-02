@@ -25,11 +25,16 @@ pub fn set(hwnd: isize, enable: bool, rect: (i32, i32, i32, i32)) {
             }
             return;
         }
-        if !REGISTERED.swap(true, Ordering::SeqCst) {
-            SHAppBarMessage(ABM_NEW, &mut data);
+        // On repart d'une inscription neuve : une ancienne réservation (Lumo fermé brutalement,
+        // par exemple par l'installeur) ne doit pas pousser la barre vers le bas.
+        if REGISTERED.swap(true, Ordering::SeqCst) {
+            SHAppBarMessage(ABM_REMOVE, &mut data);
         }
+        SHAppBarMessage(ABM_NEW, &mut data);
         SHAppBarMessage(ABM_QUERYPOS, &mut data);
-        data.rc.bottom = data.rc.top + height;
+        // Windows peut proposer une bande plus basse (s'il croit le haut déjà pris) :
+        // Lumo veut toujours le bord supérieur de l'écran.
+        data.rc = RECT { left: rect.0, top: rect.1, right: rect.2, bottom: rect.1 + height };
         SHAppBarMessage(ABM_SETPOS, &mut data);
     }
 }

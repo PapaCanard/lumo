@@ -21,6 +21,10 @@ export async function place(reserve: boolean): Promise<void> {
   document.documentElement.dataset.mode = "bar";
   await dock(BAR_H);
   await setReserve(reserve);
+  await dock(BAR_H);
+  // Au démarrage, Windows peut encore décaler la fenêtre (réservation de place, écran qui
+  // s'initialise…) : on la remet en haut quelques fois, sans toucher à la console ouverte.
+  for (const ms of [400, 1500, 4000]) setTimeout(() => void dock(current === "console" ? BAR_H + consoleHeight() : BAR_H), ms);
 }
 
 export async function setReserve(on: boolean): Promise<void> {

@@ -5,6 +5,8 @@ import { ICON } from "./icons";
 import { explainError, testConnection } from "./providers";
 import { DEFAULT_BAR, DEFAULT_SYSTEM, type Prefs } from "./store";
 import { ENGINES, search, type Engine } from "./web";
+import { addMemo, allMemos, clearMemory, onMemoryChange, removeMemo, updateMemo } from "./memory";
+import { memoryLocation } from "./bridge";
 
 export interface SettingsHost {
   prefs: Prefs;
@@ -119,6 +121,9 @@ export async function renderSettings(root: HTMLElement, host: SettingsHost, opts
 
   // ─── accès à internet ───────────────────────────────────────────────────────
   scroll.append(webPanel(host));
+
+  // ─── mémoire ────────────────────────────────────────────────────────────────
+  scroll.append(memoryPanel(host));
 
   // ─── apparence ──────────────────────────────────────────────────────────────
   const look = el("section", "panel");
@@ -503,7 +508,7 @@ function webPanel(host: SettingsHost): HTMLElement {
   const globe = el("span", "web-globe");
   globe.innerHTML = ICON.globe;
   const txt = el("div", "web-txt");
-  txt.append(el("h3", "", "Accès à internet"), el("span", "muted small", "Les IA peuvent chercher sur le web et lire des pages pour répondre avec des informations à jour, et citer leurs sources."));
+  txt.append(el("h3", "", "Accès à internet"), el("span", "muted small", "Les IA peuvent chercher sur le web et lire des pages, et citer leurs sources. Par défaut, seulement quand tu le demandes."));
   const sw = el("label", "switch");
   const cb = input("checkbox");
   cb.checked = prefs.web;
@@ -529,7 +534,16 @@ function webPanel(host: SettingsHost): HTMLElement {
     ["ChatGPT, Mistral, Groq, OpenRouter, DeepSeek", "appellent les outils de Lumo : « chercher » et « lire une page »."],
     ["Copilot et IA locales", "Lumo cherche d'abord, puis leur transmet les résultats avec ta question."],
   ].forEach(([who, what]) => { const li = el("li"); li.append(el("strong", "", who), ` ${what}`); how.append(li); });
-  body.append(how);
+  const modeSel = el("select");
+  for (const [v, t] of [["ask", "Seulement quand je le demande (recommandé)"], ["auto", "L'IA décide (cherche dès qu'elle le juge utile)"]]) { const o = el("option", "", t); o.value = v; modeSel.append(o); }
+  modeSel.value = prefs.webMode;
+  const modeNote = el("p", "muted small");
+  const drawMode = () => modeNote.textContent = prefs.webMode === "ask"
+    ? "Pour demander : clique sur le globe 🌐 de la barre avant d'envoyer, écris « cherche sur internet… » / « /web … », ou colle un lien."
+    : "Le globe de la barre reste allumé : l'IA peut chercher à chaque message (réponses un peu plus lentes).";
+  drawMode();
+  modeSel.onchange = () => { prefs.webMode = modeSel.value as "ask" | "auto"; host.save(); drawMode(); host.onWeb(); };
+  body.append(field("Quand chercher sur internet", modeSel), modeNote, how);
 
   const engineSel = el("select");
   for (const e of ENGINES) { const o = el("option", "", e.label); o.value = e.id; engineSel.append(o); }
@@ -581,5 +595,77 @@ function webPanel(host: SettingsHost): HTMLElement {
   };
   void refresh();
   body.append(field("Moteur de recherche utilisé par Lumo", engineSel), note, keyField, row, res.el);
+  return panel;
+}
+
+// ─── mémoire partagée ───────────────────────────────────────────────────────────
+function memoryPanel(host: SettingsHost): HTMLElement {
+  const { prefs } = host;
+  const panel = el("section", "panel web-panel mem-panel" + (prefs.memory ? " on" : ""));
+  const head = el("div", "web-head");
+  const ico = el("span", "web-globe");
+  ico.innerHTML = ICON.brain;
+  const txt = el("div", "web-txt");
+  const count = el("span", "badge");
+  const h = el("h3", "", "Mémoire ");
+  h.append(count);
+  txt.append(h, el("span", "muted small", "Lumo se souvient de toi d'une conversation à l'autre. La mémoire est partagée par toutes tes IA : ce que tu dis à Claude, Gemini le sait aussi."));
+  const sw = el("label", "switch");
+  const cb = input("checkbox");
+  cb.checked = prefs.memory;
+  sw.append(cb, el("span", "slider"));
+  head.append(ico, txt, sw);
+  panel.append(head);
+  cb.onchange = () => { prefs.memory = cb.checked; host.save(); panel.classList.toggle("on", prefs.memory); host.react(prefs.memory ? "ok" : "deleted"); };
+
+  const body = el("div", "web-body");
+  panel.append(body);
+  body.append(el("p", "muted small", "Pour lui faire retenir quelque chose : « retiens que je préfère les réponses courtes ». Pour oublier : « oublie que… ». Les IA retiennent aussi d'elles-mêmes les informations durables (métier, préférences, projets). Jamais de mots de passe ni de clés."));
+
+  const list = el("div", "mem-list");
+  const draw = () => {
+    const memos = allMemos();
+    count.textContent = `${memos.length}`;
+    list.replaceChildren();
+    if (!memos.length) { list.append(el("div", "conn-empty", "Aucun souvenir pour l'instant.")); return; }
+    for (const m of [...memos].reverse()) {
+      const row = el("div", "mem-row");
+      const t = input("text", m.text);
+      t.className = "mem-text";
+      t.title = `Retenu le ${new Date(m.at).toLocaleDateString("fr-FR")}${m.by ? ` par ${m.by}` : ""} — modifie le texte puis Entrée`;
+      t.onchange = () => updateMemo(m.id, t.value);
+      t.onkeydown = (e) => { if (e.key === "Enter") t.blur(); };
+      const meta = el("span", "mem-meta muted small", `${new Date(m.at).toLocaleDateString("fr-FR")}${m.by ? ` · ${m.by}` : ""}`);
+      const del = el("button", "icon-btn");
+      del.innerHTML = ICON.x;
+      del.title = "Oublier";
+      del.onclick = () => removeMemo(m.id);
+      row.append(t, meta, del);
+      list.append(row);
+    }
+  };
+  const off = onMemoryChange(draw);
+  // la vue est reconstruite à chaque ouverture : on se désabonne quand le panneau disparaît
+  const obs = new MutationObserver(() => { if (!panel.isConnected) { off(); obs.disconnect(); } });
+  setTimeout(() => panel.parentElement && obs.observe(panel.closest(".view") ?? document.body, { childList: true, subtree: true }), 0);
+  draw();
+
+  const addIn = input("text", "", "Ajouter un souvenir (ex. « Romain travaille chez DoIt Consulting »)");
+  const bAdd = el("button", "btn primary", "Ajouter");
+  const doAdd = () => { if (addMemo(addIn.value, "toi")) { addIn.value = ""; host.react("saved"); } };
+  bAdd.onclick = doAdd;
+  addIn.onkeydown = (e) => { if (e.key === "Enter") doAdd(); };
+  const where = el("p", "muted small");
+  void memoryLocation().then((p) => where.textContent = `Fichier : ${p}`);
+  const bClear = el("button", "btn danger", "Tout oublier");
+  let armed = 0;
+  bClear.onclick = () => {
+    if (!armed) { bClear.textContent = "Confirmer : tout oublier"; armed = window.setTimeout(() => { armed = 0; bClear.textContent = "Tout oublier"; }, 4000); return; }
+    clearTimeout(armed); armed = 0; bClear.textContent = "Tout oublier";
+    clearMemory(); host.react("deleted");
+  };
+  const row = el("div", "btn-row");
+  row.append(bClear);
+  body.append(field("Nouveau souvenir", addIn, bAdd), list, row, where);
   return panel;
 }

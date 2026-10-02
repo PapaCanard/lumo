@@ -69,6 +69,20 @@ async function mockAsk(kind: string, cred: string, model: string, hint: string, 
     if (kind === "openai") return { choices: [{ message: { role: "assistant", content: t }, finish_reason: "stop" }] };
     return { text: t };
   }
+  const memoTag = /je m'appelle (\w+)/i.exec(hint) ? `\n\n<<retiens: L'utilisateur s'appelle ${/je m'appelle (\w+)/i.exec(hint)![1]}>>` : /j'utilise|je travaille/i.test(hint) ? `\n<<retiens: ${hint.replace(/^je /i, "L'utilisateur ").slice(0, 80)}>>` : "";
+  const mem = /Ce dont tu te souviens[\s\S]*?\n((?:- .*\n)+)/.exec(JSON.stringify(body).replace(/\\n/g, "\n"));
+  if (/qui suis[- ]je|tu te souviens/i.test(hint)) {
+    const t2 = mem ? `Je me souviens que :\n${mem[1]}` : "Je ne sais rien de toi pour l'instant.";
+    if (kind === "openai") return { choices: [{ message: { role: "assistant", content: t2 }, finish_reason: "stop" }] };
+    if (kind === "gemini") return { candidates: [{ content: { parts: [{ text: t2 }] }, finishReason: "STOP" }] };
+    if (kind === "claude") return { content: [{ type: "text", text: t2 }], stop_reason: "end_turn" };
+    return { text: t2 };
+  }
+  if (memoTag) {
+    const t3 = `Enchanté, c'est noté !${memoTag}`;
+    if (kind === "claude") return { content: [{ type: "text", text: t3 }], stop_reason: "end_turn" };
+    if (kind === "openai") return { choices: [{ message: { role: "assistant", content: t3 }, finish_reason: "stop" }] };
+  }
   if (kind === "claude") return { content: [{ type: "text", text }], stop_reason: "end_turn" };
   if (kind === "gemini") {
     const parts: any[] = [{ text }];
@@ -172,4 +186,18 @@ export async function webSearchApi(engine: string, query: string, count: number)
     return { results: [1, 2, 3].map((i) => ({ title: `${engine} ${i} : ${query}`, url: `https://source${i}.com/`, content: `Extrait ${i}` })), web: { results: [] } };
   }
   return invoke("web_search_api", { engine, query, count });
+}
+
+// ─── mémoire partagée ──────────────────────────────────────────────────────────
+export async function memoryLoad(): Promise<string> {
+  if (!inTauri) return localStorage.getItem("lumo.mock.memory") ?? "[]";
+  return invoke<string>("memory_load");
+}
+export async function memorySave(data: string): Promise<void> {
+  if (!inTauri) { localStorage.setItem("lumo.mock.memory", data); return; }
+  await invoke("memory_save", { data });
+}
+export async function memoryLocation(): Promise<string> {
+  if (!inTauri) return "%APPDATA%\\fr.doitconsulting.lumo\\memoire.json (simulation)";
+  return invoke<string>("memory_location");
 }

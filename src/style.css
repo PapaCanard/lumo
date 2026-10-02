@@ -270,3 +270,20 @@ a.src:hover { background: color-mix(in srgb, var(--pc, var(--accent)) 22%, trans
 .switch input:checked + .slider::after { transform: translateX(20px); }
 .switch input:focus-visible + .slider { box-shadow: 0 0 0 3px rgba(76,194,255,.4); }
 [hidden] { display: none !important; }
+
+/* ─── globe armé, mémoire ─── */
+.cap-ico.web.idle { color: #8fa3b5; opacity: .8; }
+.cap-ico.web.armed { color: #4cc2ff; background: rgba(76,194,255,.16); box-shadow: 0 0 12px -2px #4cc2ff; animation: armed 1.6s ease-in-out infinite; }
+@keyframes armed { 50% { box-shadow: 0 0 4px -2px #4cc2ff; } }
+.memo-note { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; padding: 2px 10px 2px 8px; border-radius: 999px; font: 12px var(--ui); color: #e9c46a; background: rgba(233,196,106,.1); align-self: flex-start; }
+.memo-note.gone { color: #a0a0a8; background: rgba(255,255,255,.05); text-decoration: line-through; }
+.mem-panel.on .web-globe { background: rgba(233,196,106,.15); color: #e9c46a; box-shadow: 0 0 18px -6px #e9c46a; }
+.mem-panel .switch input:checked + .slider { background: #e9c46a; }
+.mem-panel .badge { margin-left: 6px; vertical-align: 1px; }
+.mem-list { display: flex; flex-direction: column; gap: 4px; max-height: 280px; overflow-y: auto; }
+.mem-row { display: flex; align-items: center; gap: 8px; padding: 2px 4px 2px 0; border-radius: 10px; }
+.mem-row:hover { background: rgba(255,255,255,.03); }
+.set-scroll .mem-row input.mem-text { flex: 1; min-width: 0; border-color: transparent; background: transparent; font-family: var(--ui); padding: 5px 9px; }
+.set-scroll .mem-row input.mem-text:hover { border-color: rgba(255,255,255,.08); }
+.mem-meta { white-space: nowrap; }
+.mem-row .icon-btn { width: 26px; height: 26px; }

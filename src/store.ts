@@ -14,6 +14,10 @@ export interface Prefs {
   /** Accès à internet pour les IA. */
   web: boolean;
   webEngine: Engine;
+  /** « ask » : seulement quand l'utilisateur le demande ; « auto » : l'IA décide. */
+  webMode: "ask" | "auto";
+  /** Mémoire partagée entre toutes les IA. */
+  memory: boolean;
 }
 
 /** Anciennes préférences (v1), lues une seule fois pour la migration. */
@@ -29,6 +33,7 @@ export interface StoredMessage {
   files?: string[];
   error?: boolean;
   sources?: { title: string; url: string }[];
+  memos?: string[];
 }
 
 export const DEFAULT_SYSTEM =
@@ -45,6 +50,8 @@ export const DEFAULT_PREFS: Prefs = {
   reserve: true,
   web: true,
   webEngine: "duckduckgo",
+  webMode: "ask",
+  memory: true,
 };
 
 const K_PREFS = "lumo.prefs";

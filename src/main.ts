@@ -6,6 +6,8 @@ import { CAP_LABELS, eyeColor, guessCaps, luminance, presetOf, type Caps, type C
 import { readFile, MAX_FILES } from "./files";
 import { ICON } from "./icons";
 import { renderMarkdown } from "./markdown";
+import { applyMemoryTags, loadMemory, memoryPrompt } from "./memory";
+import { stripWebPrefix, wantsWeb } from "./web";
 import { ask, explainError, type Attachment, type ChatMsg, type WebStep } from "./providers";
 import { reactToError, reactToFile, reactToReply, reactToTyping } from "./reactions";
 import { renderSettings, type SettingsOptions } from "./settings";
@@ -55,7 +57,7 @@ const active = (): Connection | undefined => conns().find((c) => c.id === prefs.
 
 const history: ChatMsg[] = loadHistory().map((m: StoredMessage) => ({
   role: m.role, text: m.text, conn: m.conn, label: m.label ?? (m.provider ? m.provider[0].toUpperCase() + m.provider.slice(1) : undefined),
-  color: m.color, error: m.error, sources: m.sources,
+  color: m.color, error: m.error, sources: m.sources, memos: m.memos,
   attachments: (m.files ?? []).map((name) => ({ name, mime: "", kind: "text" as const, size: 0, text: "" })),
 }));
 let pending: Attachment[] = [];
@@ -70,7 +72,7 @@ lumo.onSfx = sfx;
 function persist() {
   saveHistory(history.map((m) => ({
     role: m.role, text: m.images?.length ? `${m.text}${m.text ? "\n\n" : ""}_(${m.images.length} image${m.images.length > 1 ? "s" : ""} générée${m.images.length > 1 ? "s" : ""}, non conservée${m.images.length > 1 ? "s" : ""})_` : m.text,
-    conn: m.conn, label: m.label, color: m.color, error: m.error, sources: m.sources, files: (m.attachments ?? []).map((a) => a.name),
+    conn: m.conn, label: m.label, color: m.color, error: m.error, sources: m.sources, memos: m.memos, files: (m.attachments ?? []).map((a) => a.name),
   })));
 }
 const savePrefsNow = () => savePrefs(prefs);
@@ -146,21 +148,27 @@ function renderCaps() {
     summary.push(`${c.caps[k] ? "✓" : "✗"} ${CAP_LABELS[k]}`);
   });
   capsEl.title = `${c.name}${c.model ? ` (${c.model})` : ""}\n${summary.join("\n")}`;
-  // globe : accès à internet, activable d'un clic
+  // globe : recherche sur internet pour le prochain message (ou toujours, selon le réglage)
   const g = document.createElement("button");
-  g.className = `cap-ico web ${prefs.web ? "on" : "off"}`;
+  const auto = prefs.web && prefs.webMode === "auto";
+  g.className = `cap-ico web ${!prefs.web ? "off" : auto || webArmed ? "on armed" : "on idle"}`;
   g.innerHTML = ICON.globe;
-  g.title = prefs.web ? "Accès à internet : activé (clic pour couper)" : "Accès à internet : coupé (clic pour activer)";
+  g.title = !prefs.web ? "Accès à internet coupé (⚙ → Accès à internet pour l'activer)"
+    : auto ? "Internet : l'IA cherche quand elle le juge utile (réglable dans ⚙)"
+    : webArmed ? "Recherche sur internet activée pour le prochain message (clic pour annuler)"
+    : "Clic : chercher sur internet pour le prochain message.\nTu peux aussi l'écrire : « cherche sur internet… », « /web … », ou donner un lien.";
   g.onclick = () => {
-    prefs.web = !prefs.web;
-    savePrefsNow();
+    if (!prefs.web) { void openSettings(); say("L'accès à internet est coupé : active-le dans les réglages.", 4000); return; }
+    if (auto) { void openSettings(); return; }
+    webArmed = !webArmed;
     renderCaps();
-    lumo.play(prefs.web ? "search" : "sleepy");
-    say(prefs.web ? "Accès à internet activé." : "Accès à internet coupé.", 2500);
-    if (view === "settings" && currentMode() === "console") void openSettings();
+    if (webArmed) { lumo.play("search"); say("Je chercherai sur internet pour ta prochaine question.", 3000); inputEl.focus(); }
   };
   capsEl.append(g);
 }
+
+/** Recherche web demandée par le globe pour le prochain message. */
+let webArmed = false;
 
 let pillsKey = "";
 function renderPills() {
@@ -350,6 +358,16 @@ function renderMessages() {
       });
       row.append(src);
     }
+    for (const note of m.memos ?? []) {
+      const d = document.createElement("div");
+      d.className = "memo-note" + (note.startsWith("Oublié") ? " gone" : "");
+      d.innerHTML = ICON.brain;
+      const t = document.createElement("span");
+      t.textContent = note;
+      d.append(t);
+      d.title = "Mémoire partagée par toutes tes IA (⚙ → Mémoire)";
+      row.append(d);
+    }
     messagesEl.append(row);
   }
   messagesEl.scrollTop = messagesEl.scrollHeight;
@@ -488,7 +506,7 @@ async function send() {
   if (pending.some((a) => a.kind === "image") && !c.caps.images) { lumo.play("sheepish"); notice(`${c.name} ne lit pas les images avec ce modèle (pictogramme barré). Retire l'image ou change d'IA.`); return; }
   if (pending.some((a) => a.kind === "pdf") && !c.caps.pdf) { lumo.play("sheepish"); notice(`${c.name} ne lit pas les PDF. Retire le fichier ou change d'IA.`); return; }
   if (currentMode() !== "console") void openPanel();
-  history.push({ role: "user", text, attachments: pending });
+  history.push({ role: "user", text: stripWebPrefix(text) || text, attachments: pending });
   pending = [];
   inputEl.value = "";
   lastLen = 0;
@@ -501,8 +519,14 @@ async function send() {
   sfx("send");
   lumo.setThinking(true);
   try {
-    const reply = await ask(c, prefs.system, history, { web: prefs.web ? { engine: prefs.webEngine } : undefined, onStep: showStep });
-    history.push({ role: "assistant", text: reply.text, images: reply.images, sources: reply.sources, conn: c.id, label: c.name, color: c.color });
+    const useWeb = prefs.web && (prefs.webMode === "auto" || webArmed || wantsWeb(text));
+    if (webArmed) { webArmed = false; renderCaps(); }
+    const system = prefs.system + (prefs.memory ? memoryPrompt() : "");
+    const reply = await ask(c, system, history, { web: useWeb ? { engine: prefs.webEngine } : undefined, onStep: showStep });
+    const mem = prefs.memory ? applyMemoryTags(reply.text, c.name, text) : { text: reply.text, added: [], removed: [] };
+    const memos = [...mem.added.map((t) => `Retenu : ${t}`), ...mem.removed.map((t) => `Oublié : ${t}`)];
+    history.push({ role: "assistant", text: mem.text, images: reply.images, sources: reply.sources, memos, conn: c.id, label: c.name, color: c.color });
+    if (memos.length) setTimeout(() => lumo.play(mem.added.length ? "idea" : "nod"), 1800);
     lumo.setThinking(false);
     lumo.play(reply.images.length ? "camera" : reactToReply(reply.text));
     if (currentMode() !== "console") { say(preview(reply.text || "Image générée.")); void openPanel(); }
@@ -541,6 +565,7 @@ canvas.addEventListener("pointerenter", () => { if (!lumo.currentEmote) lumo.loo
 async function boot() {
   setSoundEnabled(prefs.sound);
   applyBarColor(prefs.barColor);
+  await loadMemory();
   await migrate(legacy);
   await refreshKeys();
   applyActive(false);

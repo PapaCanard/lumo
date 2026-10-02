@@ -24,6 +24,8 @@ export interface ChatMsg {
   error?: boolean;
   /** Pages consultées sur internet pour cette réponse. */
   sources?: Source[];
+  /** Souvenirs ajoutés ou oubliés grâce à cette réponse. */
+  memos?: string[];
 }
 
 export interface Reply { text: string; images: string[]; sources: Source[] }

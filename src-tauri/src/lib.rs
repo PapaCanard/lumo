@@ -6,6 +6,8 @@ mod secrets;
 mod web;
 
 use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::{json, Value};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
@@ -88,15 +90,48 @@ async fn web_search_api(engine: String, query: String, count: u32) -> Result<Val
     web::search_api(&engine, &key, &query, count).await
 }
 
+// ─── mémoire partagée par toutes les IA (fichier JSON dans le dossier de Lumo) ──
+fn memory_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.join("memoire.json"))
+}
+
+#[tauri::command]
+fn memory_load(app: AppHandle) -> Result<String, String> {
+    match std::fs::read_to_string(memory_path(&app)?) {
+        Ok(s) => Ok(s),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok("[]".into()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
+fn memory_save(app: AppHandle, data: String) -> Result<(), String> {
+    if data.len() > 1024 * 1024 {
+        return Err("mémoire trop volumineuse".into());
+    }
+    let path = memory_path(&app)?;
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, data).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn memory_location(app: AppHandle) -> Result<String, String> {
+    Ok(memory_path(&app)?.display().to_string())
+}
+
 #[tauri::command]
 async fn copilot_check() -> Result<String, String> {
     providers::copilot_version().await
 }
 
-/// Colle la fenêtre en haut de l'écran principal, sur toute sa largeur, à `height` pixels logiques.
-#[tauri::command]
-fn dock(app: AppHandle, height: f64) -> Result<(), String> {
-    let w = app.get_webview_window(WINDOW).ok_or("fenêtre introuvable")?;
+/// Hauteur demandée pour la barre (pixels logiques, en bits f64) ; 0 = pas encore placée.
+static DOCK_H: AtomicU64 = AtomicU64::new(0);
+
+/// Coin haut-gauche et taille voulus pour la fenêtre (pixels physiques) sur l'écran principal.
+fn dock_target(w: &tauri::WebviewWindow, height: f64) -> Result<(PhysicalPosition<i32>, PhysicalSize<u32>), String> {
     let monitor = w
         .primary_monitor()
         .map_err(|e| e.to_string())?
@@ -105,10 +140,61 @@ fn dock(app: AppHandle, height: f64) -> Result<(), String> {
     let scale = monitor.scale_factor();
     let pos = monitor.position();
     let size = monitor.size();
-    w.set_size(PhysicalSize::new(size.width, (height * scale).round() as u32))
-        .map_err(|e| e.to_string())?;
-    w.set_position(PhysicalPosition::new(pos.x, pos.y)).map_err(|e| e.to_string())?;
+    Ok((
+        PhysicalPosition::new(pos.x, pos.y),
+        PhysicalSize::new(size.width, (height * scale).round() as u32),
+    ))
+}
+
+fn place_window(w: &tauri::WebviewWindow, height: f64) -> Result<(), String> {
+    let (pos, size) = dock_target(w, height)?;
+    w.set_size(size).map_err(|e| e.to_string())?;
+    w.set_position(pos).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// Colle la fenêtre en haut de l'écran principal, sur toute sa largeur, à `height` pixels logiques.
+#[tauri::command]
+fn dock(app: AppHandle, height: f64) -> Result<(), String> {
+    let w = app.get_webview_window(WINDOW).ok_or("fenêtre introuvable")?;
+    DOCK_H.store(height.to_bits(), Ordering::SeqCst);
+    place_window(&w, height)
+}
+
+/// Si quelque chose déplace la barre (Windows au démarrage, changement d'écran…), on la remet en haut.
+fn keep_docked(w: &tauri::WebviewWindow) {
+    let win = w.clone();
+    w.on_window_event(move |event| {
+        let bits = DOCK_H.load(Ordering::SeqCst);
+        if bits == 0 {
+            return;
+        }
+        let height = f64::from_bits(bits);
+        match event {
+            tauri::WindowEvent::Moved(p) => {
+                if let Ok((target, _)) = dock_target(&win, height) {
+                    if p.x != target.x || p.y != target.y {
+                        let _ = win.set_position(target);
+                    }
+                }
+            }
+            tauri::WindowEvent::ScaleFactorChanged { .. } | tauri::WindowEvent::Resized(_) => {
+                if let Ok((target, size)) = dock_target(&win, height) {
+                    if let Ok(cur) = win.outer_size() {
+                        if cur.width != size.width || cur.height != size.height {
+                            let _ = win.set_size(size);
+                        }
+                    }
+                    if let Ok(p) = win.outer_position() {
+                        if p.x != target.x || p.y != target.y {
+                            let _ = win.set_position(target);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    });
 }
 
 /// Réserve (ou libère) la bande du haut : les fenêtres maximisées s'arrêtent sous la barre.
@@ -204,6 +290,9 @@ pub fn run() {
             copilot_check,
             list_models,
             web_fetch,
+            memory_load,
+            memory_save,
+            memory_location,
             web_search_api,
             dock,
             appbar,
@@ -211,6 +300,9 @@ pub fn run() {
         ])
         .setup(|app| {
             build_tray(app.handle())?;
+            if let Some(w) = app.get_webview_window(WINDOW) {
+                keep_docked(&w);
+            }
             Ok(())
         })
         .run(tauri::generate_context!())

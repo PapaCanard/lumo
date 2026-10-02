@@ -111,3 +111,19 @@ export function formatResults(list: SearchResult[]): string {
   if (!list.length) return "Aucun résultat.";
   return list.map((r, i) => `[${i + 1}] ${r.title}\n${r.url}\n${r.snippet}`).join("\n\n");
 }
+
+/** L'utilisateur demande-t-il explicitement d'aller sur internet ? (lien, « cherche sur internet », « /web »…) */
+export function wantsWeb(text: string): boolean {
+  const s = text.toLowerCase();
+  return /^\s*(\/web\b|web\s*:)/.test(s)
+    || /https?:\/\/\S+/.test(s)
+    || /\b(sur|via|depuis|dans|avec) (internet|le web|le net|google|bing|duckduckgo)\b/.test(s)
+    || /\b(en ligne|sur la toile)\b/.test(s) && /(cherch|recherch|regard|v[ée]rifi|trouv|consult|actualit|infos?\b)/.test(s)
+    || /\b(fais|faire|lance|lancer|fait) (une |des )?recherches?\b/.test(s)
+    || /\b(cherche|recherche|trouve|v[ée]rifie|regarde)[- ]moi\b/.test(s)
+    || /\b(peux|pourrais|pouvez|pourriez)[- ](tu|vous) (me )?(chercher|rechercher|v[ée]rifier|regarder|trouver)\b.*\b(internet|web|en ligne|google|actualit|source)/.test(s)
+    || /\b(googl(e|er|ise)|search the web|look (it )?up online)\b/.test(s)
+    || /\b(derni[èe]res? (nouvelles|infos|informations|actualit[ée]s)|actualit[ée]s? (du jour|d'aujourd'hui|r[ée]centes?))\b/.test(s);
+}
+/** Retire le préfixe « /web » ou « web: » éventuel. */
+export const stripWebPrefix = (t: string) => t.replace(/^\s*(\/web\b|web\s*:)\s*/i, "");
